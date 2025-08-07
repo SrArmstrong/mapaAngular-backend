@@ -12,13 +12,21 @@ api.get('/', (req, res) => {
     res.send("Conexión exitosa");
 });
 
-api.get('/usuarios', async (req, res) => {
-    try{
-        const usuarios = await sql`SELECT * FROM usuarios`;
-        res.json(usuarios); 
+api.get('/delivery', async (req, res) => {
+    try {
+        const usuarios = await sql`
+            SELECT * FROM usuarios WHERE role = 'delivery'
+        `;
+
+        if (usuarios.length > 0) {
+            res.json({ mensaje: 'Usuarios encontrados', usuarios});
+        } else {
+            res.status(404).json({ mensaje: 'No se encontraron deliverys' });
+        }
+
     } catch (error) {
-        console.error("Error al obtener usuarios:", error);
-        res.status(500).json({ error: 'Error al obtener usuarios' })
+        console.error("Error con la consulta:", error);
+        res.status(500).json({ error: 'Error en el servidor' });
     }
 });
 
@@ -41,7 +49,6 @@ api.post('/login', async (req, res) => {
         res.status(500).json({ error: 'Error en el servidor' });
     }
 });
-
 
 api.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
