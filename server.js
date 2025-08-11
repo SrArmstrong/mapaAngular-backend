@@ -1,15 +1,34 @@
 import express from 'express';
 import sql from './db.js'; // Importando la conexión a la base de datos
 import cors from 'cors';
+import http from 'http';
+import { Server } from 'socket.io';
 
 const PORT = 3001;
 const api = express();
+const server = http.createServer(api);
+const io = new Server(server, {
+  cors: { origin: '*' }
+});
 
 api.use(cors());
 api.use(express.json()); 
 
 api.get('/', (req, res) => {
     res.send("Conexión exitosa");
+});
+
+io.on('connection', (socket) => {
+  console.log('Cliente conectado:', socket.id);
+
+  socket.on('ubicacion_repartidor', (ubicacion) => {
+    console.log('Ubicación recibida:', ubicacion);
+    // Aquí puedes guardar en BD o reenviar a otros clientes
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Cliente desconectado:', socket.id);
+  });
 });
 
 api.get('/delivery', async (req, res) => {
@@ -30,74 +49,101 @@ api.get('/delivery', async (req, res) => {
     }
 });
 
-api.get('/paquetes', async (req, res) => {
-    try{
+// Endpoint para obtener paquetes sin asignar
+api.get('/packages', async (req, res) => {
+    try {
         const paquetes = await sql`
-            SELECT * FROM paquetes
+            SELECT * FROM paquetes WHERE deliveryid IS NULL
         `;
-
-        if (paquetes.length > 0) {
-            res.json({ mensaje: 'Paquetes encontrados', paquetes });
-        } else {
-            res.status(404).json({ mensaje: 'No se encontraron paquetes' });
-        }
+        res.json({ paquetes });
     } catch (error) {
-        console.error("Error con la consulta:", error);
+        console.error("Error al obtener paquetes:", error);
         res.status(500).json({ error: 'Error en el servidor' });
     }
 });
 
-api.post('/addPaquetes', async (req, res) => {
-  try {
-    const { direccion, estatus, delivery_id } = req.body;
-
-    if (!direccion || !estatus) {
-      return res.status(400).json({ mensaje: 'Faltan datos obligatorios' });
+// Obtener paquetes asignados a un delivery específico
+api.get('/packages/delivery/:deliveryId', async (req, res) => {
+    try {
+        const { deliveryId } = req.params;
+        const paquetes = await sql`
+            SELECT * FROM paquetes WHERE deliveryid = ${deliveryId}
+        `;
+        res.json({ paquetes });
+    } catch (error) {
+        console.error("Error al obtener paquetes del delivery:", error);
+        res.status(500).json({ error: 'Error en el servidor' });
     }
-
-    const result = await sql`
-      INSERT INTO entregas (direccion, estatus, delivery_id)
-      VALUES (${direccion}, ${estatus}, ${delivery_id})
-      RETURNING *;
-    `;
-
-    res.status(201).json({ mensaje: 'Paquete creado', paquete: result[0] });
-  } catch (error) {
-    console.error("Error al crear paquete:", error);
-    res.status(500).json({ error: 'Error en el servidor' });
-  }
 });
 
-// PUT - Actualizar solo el estatus del paquete
-api.put('/paquetes/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { estatus } = req.body;
-
-    const estadosValidos = ['En camino', 'Entregado', 'Cancelado'];
-
-    if (!estatus || !estadosValidos.includes(estatus)) {
-      return res.status(400).json({ mensaje: 'Estatus inválido. Debe ser uno de: "En camino", "Entregado", "Cancelado"' });
+api.put('/updatePackageStatus/:packageId', async (req, res) => {
+    try {
+        const { packageId } = req.params;
+        const { estatus } = req.body;
+        
+        const updatedPackage = await sql`
+            UPDATE paquetes 
+            SET estatus = ${estatus} 
+            WHERE id = ${packageId}
+            RETURNING *
+        `;
+        
+        res.json({ paquete: updatedPackage[0] });
+    } catch (error) {
+        console.error("Error al actualizar paquete:", error);
+        res.status(500).json({ error: 'Error en el servidor' });
     }
-
-    const result = await sql`
-      UPDATE entregas
-      SET estatus = ${estatus}
-      WHERE id = ${id}
-      RETURNING *;
-    `;
-
-    if (result.length === 0) {
-      return res.status(404).json({ mensaje: 'Paquete no encontrado' });
-    }
-
-    res.json({ mensaje: 'Estatus actualizado', paquete: result[0] });
-  } catch (error) {
-    console.error("Error al actualizar estatus:", error);
-    res.status(500).json({ error: 'Error en el servidor' });
-  }
 });
 
+// Endpoint para crear paquetes
+api.post('/addPackages', async (req, res) => {
+    try {
+        const { direccion } = req.body;
+
+        if (!direccion) {
+            return res.status(400).json({ error: 'La dirección es obligatoria' });
+        }
+
+        const result = await sql`
+            INSERT INTO paquetes (id, direccion, estatus)
+            VALUES (DEFAULT, ${direccion}, 'En espera')
+            RETURNING id, direccion, estatus, deliveryid
+        `;
+
+        res.status(201).json({ paquete: result[0] });
+    } catch (error) {
+        console.error("Error al crear paquete:", error);
+        res.status(500).json({ error: 'Error al crear paquete' });
+    }
+});
+
+// Endpoint para asignar paquete a repartidor
+api.put('/assignPackage/:packageId', async (req, res) => {
+    try {
+        const { packageId } = req.params;
+        const { delivery_id } = req.body;
+
+        if (!delivery_id) {
+            return res.status(400).json({ error: 'El ID del repartidor es obligatorio' });
+        }
+
+        const result = await sql`
+            UPDATE paquetes
+            SET deliveryid = ${delivery_id}, estatus = 'En camino'
+            WHERE id = ${packageId} AND deliveryid IS NULL
+            RETURNING id, direccion, estatus, deliveryid
+        `;
+
+        if (result.length === 0) {
+            return res.status(404).json({ error: 'Paquete no encontrado o ya asignado' });
+        }
+
+        res.json({ paquete: result[0] });
+    } catch (error) {
+        console.error("Error al asignar paquete:", error);
+        res.status(500).json({ error: 'Error al asignar paquete' });
+    }
+});
 
 api.post('/login', async (req, res) => {
     const { username, password } = req.body;
