@@ -8,8 +8,14 @@ const PORT = 3001;
 const api = express();
 const server = http.createServer(api);
 const io = new Server(server, {
-  cors: { origin: '*' }
+  cors: {
+    origin: ["http://localhost:4200"], // Añade aquí tu URL de desarrollo
+    methods: ["GET", "POST"],
+    credentials: true
+  }
 });
+
+const repartidoresUbicaciones = {};
 
 api.use(cors());
 api.use(express.json()); 
@@ -21,13 +27,26 @@ api.get('/', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Cliente conectado:', socket.id);
 
-  socket.on('ubicacion_repartidor', (ubicacion) => {
-    console.log('Ubicación recibida:', ubicacion);
-    // Aquí puedes guardar en BD o reenviar a otros clientes
+    socket.on('ubicacion_repartidor', (data) => {
+        console.log('Evento ubicacion_repartidor recibido');
+        console.log('Ubicación recibida del deliveryId:', data.deliveryId);
+        console.log('Datos completos recibidos:', data);
+        repartidoresUbicaciones[data.deliveryId] = { ...data.ubicacion, socketId: socket.id };
+        io.emit('ubicacion_repartidor', data);
+    });
+
+
+  socket.on('obtener_ubicaciones', () => {
+    socket.emit('ubicaciones_actuales', repartidoresUbicaciones);
   });
 
   socket.on('disconnect', () => {
     console.log('Cliente desconectado:', socket.id);
+    for (const [id, ubicacion] of Object.entries(repartidoresUbicaciones)) {
+      if (ubicacion.socketId === socket.id) {
+        delete repartidoresUbicaciones[id];
+      }
+    }
   });
 });
 
@@ -165,6 +184,6 @@ api.post('/login', async (req, res) => {
     }
 });
 
-api.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+server.listen(3000, () => {
+  console.log('Servidor corriendo en http://localhost:3000');
 });
