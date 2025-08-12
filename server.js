@@ -4,7 +4,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 
-const PORT = 3001;
+
 const api = express();
 const server = http.createServer(api);
 const io = new Server(server, {
@@ -27,91 +27,27 @@ api.get('/', (req, res) => {
 
 io.on('connection', (socket) => {
   console.log('Cliente conectado:', socket.id);
-  
-  // Manejar autenticación/identificación del repartidor
-  socket.on('identificar_repartidor', (deliveryId) => {
-    if (!deliveryId) return;
-    
-    // Guardar referencia del socket por deliveryId
-    deliverySockets[deliveryId] = socket.id;
-    
-    console.log(`Repartidor ${deliveryId} identificado con socket ${socket.id}`);
-    
-    // Notificar a otros clientes sobre nuevo repartidor conectado
-    socket.broadcast.emit('repartidor_conectado', deliveryId);
-  });
 
-  // Manejar actualizaciones de ubicación
-  socket.on('ubicacion_repartidor', (data) => {
-    if (!data.deliveryId || !data.ubicacion) {
-      return console.warn('Datos incompletos recibidos:', data);
-    }
-
-    // Validar coordenadas
-    if (!isValidCoordinate(data.ubicacion.lat) || !isValidCoordinate(data.ubicacion.lng)) {
-      return console.warn('Coordenadas inválidas:', data.ubicacion);
-    }
-
-    console.log(`Actualización ubicación repartidor ${data.deliveryId}:`, data.ubicacion);
-    
-    // Actualizar ubicación con timestamp
-    repartidoresUbicaciones[data.deliveryId] = { 
-      ...data.ubicacion, 
-      socketId: socket.id,
-      lastUpdated: new Date().toISOString()
-    };
-    
-    // Emitir a todos los clientes excepto al emisor
-    socket.broadcast.emit('ubicacion_repartidor', {
-      deliveryId: data.deliveryId,
-      ubicacion: data.ubicacion
+    socket.on('ubicacion_repartidor', (data) => {
+        console.log('Evento ubicacion_repartidor recibido');
+        console.log('Ubicación recibida del deliveryId:', data.deliveryId);
+        console.log('Datos completos recibidos:', data);
+        repartidoresUbicaciones[data.deliveryId] = { ...data.ubicacion, socketId: socket.id };
+        io.emit('ubicacion_repartidor', data);
     });
+
+
+  socket.on('obtener_ubicaciones', () => {
+    socket.emit('ubicaciones_actuales', repartidoresUbicaciones);
   });
 
-  // Proporcionar ubicaciones actuales cuando se soliciten
-  socket.on('obtener_ubicaciones', (callback) => {
-    // Usar callback para respuesta directa
-    if (typeof callback === 'function') {
-      callback(repartidoresUbicaciones);
-    }
-  });
-
-  // Manejar desconexiones
   socket.on('disconnect', () => {
     console.log('Cliente desconectado:', socket.id);
-    
-    // Encontrar y limpiar repartidor desconectado
-    for (const [deliveryId, ubicacion] of Object.entries(repartidoresUbicaciones)) {
+    for (const [id, ubicacion] of Object.entries(repartidoresUbicaciones)) {
       if (ubicacion.socketId === socket.id) {
-        delete repartidoresUbicaciones[deliveryId];
-        
-        // Notificar a otros clientes
-        io.emit('repartidor_desconectado', Number(deliveryId));
-        console.log(`Repartidor ${deliveryId} marcado como desconectado`);
-        break;
+        delete repartidoresUbicaciones[id];
       }
     }
-    
-    // Limpiar de deliverySockets
-    for (const [id, sockId] of Object.entries(deliverySockets)) {
-      if (sockId === socket.id) {
-        delete deliverySockets[id];
-        break;
-      }
-    }
-  });
-
-  // Heartbeat para conexiones activas
-  const heartbeatInterval = setInterval(() => {
-    if (socket.connected) {
-      socket.emit('heartbeat');
-    } else {
-      clearInterval(heartbeatInterval);
-    }
-  }, 30000);
-
-  socket.on('pong', () => {
-    console.log(`Heartbeat recibido de ${socket.id}`);
   });
 });
 
