@@ -16,7 +16,6 @@ const io = new Server(server, {
 });
 
 const repartidoresUbicaciones = {};
-const deliverySockets = {}; 
 
 api.use(cors());
 api.use(express.json()); 
@@ -28,18 +27,71 @@ api.get('/', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Cliente conectado:', socket.id);
 
-    socket.on('ubicacion_repartidor', (data) => {
-        console.log('Evento ubicacion_repartidor recibido');
+    socket.on('join-admin', () => {
+        socket.join('admin');
+        console.log('👨‍💼 Admin conectado a sala');
+    });
+    
+
+    socket.on('ubicacion_repartidor', async (data) => {
         console.log('Ubicación recibida del deliveryId:', data.deliveryId);
-        console.log('Datos completos recibidos:', data);
-        repartidoresUbicaciones[data.deliveryId] = { ...data.ubicacion, socketId: socket.id };
-        io.emit('ubicacion_repartidor', data);
+        console.log('Datos recibidos:', JSON.stringify(data, null, 2));
+        
+        try {
+            // Actualizar la base de datos
+            const lat = Number(data.ubicacion.lat);
+            const lng = Number(data.ubicacion.lng);
+
+            await sql`
+                UPDATE usuarios 
+                SET 
+                    lat = ${lat},
+                    lng = ${lng},
+                    state = 'Activo'
+                WHERE id = ${data.deliveryId}
+            `;
+            
+            console.log('✅ Ubicación guardada en BD para repartidor:', data.deliveryId);
+            
+            // Enviar solo a administradores (sala 'admin')
+            io.to('admin').emit('ubicacion_repartidor', {
+                deliveryId: data.deliveryId,
+                ubicacion: {
+                    latitud: lat, // Mantener consistencia con frontend
+                    longitud: lng
+                },
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            console.error('❌ Error al guardar ubicación:', error);
+            socket.emit('error', { message: 'Error al guardar ubicación' });
+        }
     });
 
 
-  socket.on('obtener_ubicaciones', () => {
-    socket.emit('ubicaciones_actuales', repartidoresUbicaciones);
-  });
+    socket.on('obtener_ubicaciones', async () => {
+        try {
+            const ubicaciones = await sql`
+                SELECT id, username, lat, lng, state 
+                FROM usuarios 
+                WHERE role = 'delivery' AND lat IS NOT NULL AND lng IS NOT NULL
+            `;
+            
+            const ubicacionesFormateadas = ubicaciones.reduce((acc, repartidor) => {
+                acc[repartidor.id] = {
+                    latitud: repartidor.lat,
+                    longitud: repartidor.lng,
+                    estado: repartidor.state
+                };
+                return acc;
+            }, {});
+            
+            socket.emit('ubicaciones_actuales', ubicacionesFormateadas);
+        } catch (error) {
+            console.error('Error al obtener ubicaciones:', error);
+        }
+    });
 
   socket.on('disconnect', () => {
     console.log('Cliente desconectado:', socket.id);
@@ -51,10 +103,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Función de validación de coordenadas
-function isValidCoordinate(coord) {
-  return typeof coord === 'number' && !isNaN(coord) && Math.abs(coord) <= 90;
-}
 
 api.get('/delivery', async (req, res) => {
     try {
