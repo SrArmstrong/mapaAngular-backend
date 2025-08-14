@@ -9,7 +9,7 @@ const api = express();
 const server = http.createServer(api);
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:4200"], // Añade aquí tu URL de desarrollo
+    origin: ["http://localhost:4200","http://72.60.31.237"], // Añade aquí tu URL de desarrollo
     methods: ["GET", "POST"],
     credentials: true
   }
