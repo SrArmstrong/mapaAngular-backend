@@ -8,8 +8,9 @@ import { Server } from 'socket.io';
 const api = express();
 const server = http.createServer(api);
 const io = new Server(server, {
+  path: '/proyecto1/api/socket.io',
   cors: {
-    origin: ["http://localhost:4200","http://72.60.31.237"], // Añade aquí tu URL de desarrollo
+    origin: ["http://localhost:4200","https://72.60.31.237"], // Añade aquí tu URL de desarrollo
     methods: ["GET", "POST"],
     credentials: true
   }
