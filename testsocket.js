@@ -9,7 +9,7 @@ const socket = io("https://72.60.31.237/proyecto1/api", {
 */
 
 const socket = io("https://72.60.31.237", {
-  path: "/proyecto1/api/socket.io",
+  path: "/proyecto1/api/socket.io/",
   transports: ["websocket", "polling"],
   rejectUnauthorized: false
 });

@@ -32,6 +32,11 @@ io.on('connection', (socket) => {
         socket.join('admin');
         console.log('👨‍💼 Admin conectado a sala');
     });
+
+    socket.on('join-delivery', (deliveryId) => {
+        socket.join(`delivery-${deliveryId}`);
+        console.log(`Repartidor ${deliveryId} se unió a su sala`);
+    });
     
 
     socket.on('ubicacion_repartidor', async (data) => {
@@ -181,14 +186,32 @@ api.get('/packages/delivery/:deliveryId', async (req, res) => {
 api.put('/updatePackageStatus/:packageId', async (req, res) => {
     try {
         const { packageId } = req.params;
-        const { estatus } = req.body;
+        const { estatus, deliveryId } = req.body;
         
+        if (!deliveryId) {
+            return res.status(400).json({ error: 'Se requiere ID de repartidor' });
+        }
+
         const updatedPackage = await sql`
             UPDATE paquetes 
             SET estatus = ${estatus} 
             WHERE id = ${packageId}
             RETURNING *
         `;
+        
+        // Emitir evento a la sala del delivery correspondiente
+        io.to(`delivery-${deliveryId}`).emit('paquete_actualizado', {
+            packageId,
+            estatus,
+            paquete: updatedPackage[0]
+        });
+
+        io.to('admin').emit('paquete_actualizado', {
+            packageId,
+            estatus,
+            paquete: updatedPackage[0]
+        });
+
         
         res.json({ paquete: updatedPackage[0] });
     } catch (error) {
@@ -211,6 +234,8 @@ api.post('/addPackages', async (req, res) => {
             VALUES (DEFAULT, ${direccion}, 'En espera')
             RETURNING id, direccion, estatus, deliveryid
         `;
+
+        io.to('admin').emit('nuevo_paquete', result[0]);
 
         res.status(201).json({ paquete: result[0] });
     } catch (error) {
@@ -239,6 +264,10 @@ api.put('/assignPackage/:packageId', async (req, res) => {
         if (result.length === 0) {
             return res.status(404).json({ error: 'Paquete no encontrado o ya asignado' });
         }
+
+        // Notificar al repartidor sobre el nuevo paquete
+        io.to(`delivery-${delivery_id}`).emit('nuevo_paquete_asignado', result[0]);
+        io.to('admin').emit('paquete_asignado', result[0]);
 
         res.json({ paquete: result[0] });
     } catch (error) {
